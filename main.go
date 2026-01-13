@@ -46,6 +46,11 @@ func main() {
 		log.Fatal("No wifi interfaces found")
 	}
 
+	password := "MyPassword"
+	if len(os.Args) > 1 {
+		password = os.Args[1]
+	}
+
 	targetIface := wInterfaces[0]
 	fmt.Printf("\nTarget: %s\n", targetIface.Name)
 
@@ -56,27 +61,48 @@ func main() {
 	defer cancel()
 
 	go func() {
-		_, err := pkg.StartHostapd(ctx, targetIface.Name, "192.168.107.1/24", "MySSID", "MyPassword")
-		if err != nil {
-			log.Fatalf("Error starting AP: %v", err)
-		}
+		fmt.Println("Press ENTER to stop...")
+		fmt.Scanln()
+		cancel()
 	}()
+
+	cmdHostapd, err := pkg.StartHostapd(ctx, targetIface.Name, "192.168.107.1/24", "MySSID", password)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "start hostapd:", err)
+		os.Exit(1)
+	}
 
 	iface := targetIface.Name
 	ip := "192.168.107.1"
 
-	cmd, err := pkg.StartDnsmasq(ctx, iface, ip)
+	cmdDnsmasq, err := pkg.StartDnsmasq(ctx, iface, ip)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "start dnsmasq:", err)
 		os.Exit(1)
 	}
 
-	// Wait until dnsmasq exits or context is canceled
-	err = cmd.Wait()
-	// If context canceled, ensure it stops
-	pkg.StopCmd(cmd)
+	// Wait until dnsmasq  or Hostapd exits or context is canceled
+	errChan := make(chan error, 2)
+	go func() {
+		errChan <- cmdHostapd.Wait()
+	}()
+	go func() {
+		errChan <- cmdDnsmasq.Wait()
+	}()
+
+	select {
+	case err = <-errChan:
+		// One of the commands exited
+	case <-ctx.Done():
+		// Context canceled
+	}
+
+	// Cleanup
+	fmt.Println("Cleaning up...")
+	pkg.StopCmd(cmdDnsmasq)
+	pkg.StopCmd(cmdHostapd)
 
 	if err != nil && ctx.Err() == nil {
-		fmt.Fprintln(os.Stderr, "dnsmasq exited:", err)
+		fmt.Fprintln(os.Stderr, "exited:", err)
 	}
 }

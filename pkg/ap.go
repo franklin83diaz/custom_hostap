@@ -52,13 +52,16 @@ rsn_pairwise=CCMP`, ifaceName, ssid, password)
 	// 5. Run hostapd (blocking)
 	// Use Cmd to see output in console
 	cmd := exec.CommandContext(ctx, "hostapd", configFile)
+	// Send hostapd logs to your program output
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("hostapd execution error: %v", err)
-	}
+	// Put hostapd in its own process group so we can stop the whole group cleanly.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
 	return cmd, nil
 }
 
