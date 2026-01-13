@@ -110,6 +110,14 @@ func main() {
 		cancel()
 	}()
 
+	wanIface, err := pkg.DetectWANInterface()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "DetectWANInterface:", err)
+		os.Exit(1)
+	}
+
+	_ = pkg.EnableNAT(ctx, "192.168.107.0/24", "wlan0", wanIface)
+
 	select {
 	case err = <-errChan:
 		// One of the commands exited
