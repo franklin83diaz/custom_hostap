@@ -148,6 +148,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Warning: failed to remove firewall rules: %v\n", err)
 	}
 
+	// Re-enable Network Manager management
+	fmt.Println("Re-enabling Network Manager...")
+	if err := pkg.SetNMManagedState(iface, true); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to re-enable Network Manager: %v\n", err)
+	}
+
 	if err != nil && ctx.Err() == nil {
 		fmt.Fprintln(os.Stderr, "exited:", err)
 	}
