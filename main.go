@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"os"
 	"wifigo/pkg"
 
 	"github.com/mdlayher/wifi"
@@ -38,6 +40,7 @@ func GetWifi() []WInterface {
 }
 
 func main() {
+
 	wInterfaces := GetWifi()
 	if len(wInterfaces) == 0 {
 		log.Fatal("No wifi interfaces found")
@@ -46,9 +49,34 @@ func main() {
 	targetIface := wInterfaces[0]
 	fmt.Printf("\nTarget: %s\n", targetIface.Name)
 
+	// Disable NetworkManager management for this interface
 	pkg.SetNMManagedState(targetIface.Name, false)
-	err := pkg.StartAP(targetIface.Name, "192.168.107.1/24", "MySSID", "MyPassword")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_, err := pkg.StartHostapd(ctx, targetIface.Name, "192.168.107.1/24", "MySSID", "MyPassword")
+		if err != nil {
+			log.Fatalf("Error starting AP: %v", err)
+		}
+	}()
+
+	iface := targetIface.Name
+	ip := "192.168.107.1"
+
+	cmd, err := pkg.StartDnsmasq(ctx, iface, ip)
 	if err != nil {
-		log.Fatalf("Error starting AP: %v", err)
+		fmt.Fprintln(os.Stderr, "start dnsmasq:", err)
+		os.Exit(1)
+	}
+
+	// Wait until dnsmasq exits or context is canceled
+	err = cmd.Wait()
+	// If context canceled, ensure it stops
+	pkg.StopCmd(cmd)
+
+	if err != nil && ctx.Err() == nil {
+		fmt.Fprintln(os.Stderr, "dnsmasq exited:", err)
 	}
 }
