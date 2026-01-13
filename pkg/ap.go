@@ -5,58 +5,197 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 
 	"github.com/vishvananda/netlink"
 )
 
-// StartHostapd configures and starts the hostapd service.
+// unblockRFKill attempts to unblock rfkill for the given interface by finding its phy number
+func unblockRFKill(ifaceName string) error {
+	// First try to unblock all wifi
+	cmd := exec.Command("rfkill", "unblock", "wifi")
+	if err := cmd.Run(); err != nil {
+		// Non-critical error, just warn
+		fmt.Printf("  rfkill unblock wifi warning: %v\n", err)
+	}
+
+	// Try to find the specific phy for more targeted unblock
+	phyPath := fmt.Sprintf("/sys/class/net/%s/phy80211/name", ifaceName)
+	phyData, err := os.ReadFile(phyPath)
+	if err != nil {
+		// If we can't read phy, that's ok - we already tried unblock wifi
+		return nil
+	}
+
+	phyName := strings.TrimSpace(string(phyData))
+
+	// Try to unblock specific phy (use index number instead of name)
+	phyIndex := ""
+	if len(phyName) > 3 && phyName[:3] == "phy" {
+		phyIndex = phyName[3:]
+	}
+
+	if phyIndex != "" {
+		cmd = exec.Command("rfkill", "unblock", phyIndex)
+		if err := cmd.Run(); err != nil {
+			// Non-critical, we already did wifi unblock
+			fmt.Printf("  rfkill unblock %s warning: %v\n", phyIndex, err)
+		}
+	}
+
+	return nil
+}
+
+// WifiStandard represents the WiFi generation to use (up to Wi-Fi 6)
+type WifiStandard string
+
+const (
+	Wifi4 WifiStandard = "wifi4" // 802.11n - 2.4GHz / 5GHz
+	Wifi5 WifiStandard = "wifi5" // 802.11ac - 5GHz
+	Wifi6 WifiStandard = "wifi6" // 802.11ax - 2.4GHz / 5GHz (NO 6GHz here)
+)
+
+// WifiConfig holds the WiFi configuration parameters
+type WifiConfig struct {
+	Standard WifiStandard // Wifi4, Wifi5, Wifi6
+	Band     string       // "2.4" or "5" (GHz) - optional, auto-selected if empty
+	Channel  int          // optional, auto-selected if 0
+}
+
+// normalizeBand maps common inputs to "2.4", "5", or "" (auto)
+func normalizeBand(b string) string {
+	b = strings.TrimSpace(strings.ToLower(b))
+	switch b {
+	case "", "auto":
+		return ""
+	case "2.4", "2.4ghz", "24", "2", "2g", "2ghz":
+		return "2.4"
+	case "5", "5ghz", "5g":
+		return "5"
+	default:
+		// unknown -> treat as auto
+		return ""
+	}
+}
+
+// configureWifiSettings converts WifiConfig into hostapd parameters (up to Wi-Fi 6)
+func configureWifiSettings(config *WifiConfig) (hwMode string, channel int, ieee80211n, ieee80211ac, ieee80211ax bool) {
+	band := normalizeBand(config.Band)
+
+	// Default band by standard (sane defaults)
+	if band == "" {
+		switch config.Standard {
+		case Wifi5, Wifi6:
+			band = "5"
+		case Wifi4:
+			fallthrough
+		default:
+			band = "2.4"
+		}
+	}
+
+	// hw_mode
+	if band == "2.4" {
+		hwMode = "g"
+	} else {
+		hwMode = "a"
+	}
+
+	// default channel
+	channel = config.Channel
+	if channel == 0 {
+		if band == "2.4" {
+			channel = 6
+		} else {
+			channel = 36
+		}
+	}
+
+	// enable standards
+	switch config.Standard {
+	case Wifi4:
+		ieee80211n = true
+	case Wifi5:
+		ieee80211n = true
+		ieee80211ac = true
+	case Wifi6:
+		ieee80211n = true
+		ieee80211ac = true
+		ieee80211ax = true
+	default:
+		// default to Wi-Fi 6
+		ieee80211n = true
+		ieee80211ac = true
+		ieee80211ax = true
+	}
+
+	// ac only valid on 5GHz
+	if band != "5" {
+		ieee80211ac = false
+	}
+
+	return hwMode, channel, ieee80211n, ieee80211ac, ieee80211ax
+}
+
+// StartHostapd configures and starts hostapd.
 // addrAndMask example: "192.168.107.1/24"
-func StartHostapd(ctx context.Context, ifaceName, addrAndMask, ssid, password string) (*exec.Cmd, error) {
+func StartHostapd(ctx context.Context, ifaceName, addrAndMask, ssid, password string, config *WifiConfig) (*exec.Cmd, error) {
+	// Default config if none provided: Wi-Fi 6 on 5GHz
+	if config == nil {
+		config = &WifiConfig{
+			Standard: Wifi6,
+			Band:     "5",
+		}
+	}
+
+	hwMode, channel, ieee80211n, ieee80211ac, ieee80211ax := configureWifiSettings(config)
+
+	// Unblock rfkill - this is usually not critical
+	unblockRFKill(ifaceName)
+
 	link, err := netlink.LinkByName(ifaceName)
 	if err != nil {
 		return nil, fmt.Errorf("interface not found %s: %v", ifaceName, err)
 	}
 
 	addr, _ := netlink.ParseAddr(addrAndMask)
-
 	if err := netlink.AddrAdd(link, addr); err != nil {
 		fmt.Printf("Note about IP: %v (it may have already been assigned)\n", err)
 	}
 
-	// 3. Bring the interface up (UP)
 	if err := netlink.LinkSetUp(link); err != nil {
 		return nil, fmt.Errorf("error bringing up the interface: %v", err)
 	}
 
-	// 4. Create temporary configuration file for hostapd
-	// This defines the network name (SSID) and password
 	confContent := fmt.Sprintf(`interface=%s
 driver=nl80211
 ssid=%s
-hw_mode=a
-channel=36
-ieee80211n=1
-ieee80211ac=1
+hw_mode=%s
+channel=%d
 wpa=2
 wpa_passphrase=%s
 wpa_key_mgmt=WPA-PSK
-rsn_pairwise=CCMP`, ifaceName, ssid, password)
+rsn_pairwise=CCMP`, ifaceName, ssid, hwMode, channel, password)
+
+	if ieee80211n {
+		confContent += "\nieee80211n=1"
+	}
+	if ieee80211ac {
+		confContent += "\nieee80211ac=1"
+	}
+	if ieee80211ax {
+		confContent += "\nieee80211ax=1"
+	}
 
 	configFile := "hostapd_temp.conf"
-	// In modern Go versions use os.WriteFile, in older ones ioutil.WriteFile
 	if err := os.WriteFile(configFile, []byte(confContent), 0644); err != nil {
 		return nil, fmt.Errorf("could not create hostapd config file: %v", err)
 	}
 
-	// 5. Run hostapd (blocking)
-	// Use Cmd to see output in console
 	cmd := exec.CommandContext(ctx, "hostapd", configFile)
-	// Send hostapd logs to your program output
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-
-	// Put hostapd in its own process group so we can stop the whole group cleanly.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {

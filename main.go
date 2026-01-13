@@ -55,13 +55,26 @@ func main() {
 	targetIface := wInterfaces[0]
 	fmt.Printf("\nTarget: %s\n", targetIface.Name)
 
-	// Disable NetworkManager management for this interface
-	pkg.SetNMManagedState(targetIface.Name, false)
+	// Reset interface completely (kills old processes, cleans IP, disables NM)
+	if err := pkg.ResetInterface(targetIface.Name); err != nil {
+		log.Fatalf("Failed to reset interface: %v", err)
+	}
+
+	// Wait a moment for interface to stabilize
+	time.Sleep(1 * time.Second)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	cmdHostapd, err := pkg.StartHostapd(ctx, targetIface.Name, "192.168.107.1/24", "MySSID", password)
+	// Configure WiFi settings - Simply select the WiFi generation!
+	wifiConfig := &pkg.WifiConfig{
+		Standard: pkg.Wifi5, // Options: Wifi4, Wifi5, Wifi6, Wifi7
+		// Band and Channel are optional - auto-configured if not specified
+		Band: "2.4", // Optional: "2.4" or "5" GHz
+		// Channel: 36,       // Optional: auto-selected if 0 or omitted
+	}
+
+	cmdHostapd, err := pkg.StartHostapd(ctx, targetIface.Name, "192.168.107.1/24", "MySSID", password, wifiConfig)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "start hostapd:", err)
 		os.Exit(1)

@@ -55,3 +55,82 @@ func SetInterfaceUp(ifname string) error {
 	cmd := exec.Command("ip", "link", "set", ifname, "up")
 	return cmd.Run()
 }
+
+// KillHostapdProcesses kills any running hostapd processes for a specific interface
+func KillHostapdProcesses(ifname string) {
+	// Kill by interface name match
+	cmd := exec.Command("pgrep", "-f", fmt.Sprintf("hostapd.*%s", ifname))
+	output, err := cmd.Output()
+
+	if err != nil {
+		// Also try general hostapd processes
+		cmd = exec.Command("pkill", "-9", "hostapd")
+		cmd.Run()
+		return
+	}
+
+	pid := strings.TrimSpace(string(output))
+	if pid != "" {
+		fmt.Printf("  Killing hostapd (PID: %s) for %s\n", pid, ifname)
+		exec.Command("kill", "-9", pid).Run()
+	}
+}
+
+// KillDnsmasqProcesses kills any running dnsmasq processes for a specific interface
+func KillDnsmasqProcesses(ifname string) {
+	// Kill by interface name match
+	cmd := exec.Command("pgrep", "-f", fmt.Sprintf("dnsmasq.*%s", ifname))
+	output, err := cmd.Output()
+
+	if err != nil {
+		// Also try general dnsmasq processes
+		cmd = exec.Command("pkill", "-9", "dnsmasq")
+		cmd.Run()
+		return
+	}
+
+	pid := strings.TrimSpace(string(output))
+	if pid != "" {
+		fmt.Printf("  Killing dnsmasq (PID: %s) for %s\n", pid, ifname)
+		exec.Command("kill", "-9", pid).Run()
+	}
+}
+
+// FlushIPAddresses removes all IP addresses from an interface
+func FlushIPAddresses(ifname string) error {
+	cmd := exec.Command("ip", "addr", "flush", "dev", ifname)
+	return cmd.Run()
+}
+
+// ResetInterface performs a complete reset of the wireless interface
+func ResetInterface(ifname string) error {
+	fmt.Printf("Resetting interface %s...\n", ifname)
+
+	// 1. Kill any related processes
+	KillHostapdProcesses(ifname)
+	KillDnsmasqProcesses(ifname)
+	KillWpaSupplicantForInterface(ifname)
+
+	// 2. Disable NetworkManager management
+	if err := SetNMManagedState(ifname, false); err != nil {
+		fmt.Printf("  Warning: could not disable NetworkManager: %v\n", err)
+	}
+
+	// 3. Bring interface down
+	if err := SetInterfaceDown(ifname); err != nil {
+		fmt.Printf("  Warning: could not bring interface down: %v\n", err)
+	}
+
+	// 4. Flush IP addresses
+	if err := FlushIPAddresses(ifname); err != nil {
+		fmt.Printf("  Warning: could not flush IP addresses: %v\n", err)
+	}
+
+	// 5. Bring interface back up
+	if err := SetInterfaceUp(ifname); err != nil {
+		return fmt.Errorf("failed to bring interface up: %v", err)
+	}
+
+	fmt.Printf("  Interface %s reset complete\n", ifname)
+	return nil
+}
