@@ -11,8 +11,8 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-// unblockRFKill attempts to unblock rfkill for the given interface by finding its phy number
-func unblockRFKill(ifaceName string) error {
+// UnblockRFKill attempts to unblock rfkill for the given interface by finding its phy number
+func UnblockRFKill(ifaceName string) error {
 	// First try to unblock all wifi
 	cmd := exec.Command("rfkill", "unblock", "wifi")
 	if err := cmd.Run(); err != nil {
@@ -152,7 +152,7 @@ func StartHostapd(ctx context.Context, ifaceName, addrAndMask, ssid, password st
 	hwMode, channel, ieee80211n, ieee80211ac, ieee80211ax := configureWifiSettings(config)
 
 	// Unblock rfkill - this is usually not critical
-	unblockRFKill(ifaceName)
+	UnblockRFKill(ifaceName)
 
 	link, err := netlink.LinkByName(ifaceName)
 	if err != nil {

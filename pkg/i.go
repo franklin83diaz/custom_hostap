@@ -53,7 +53,11 @@ func SetInterfaceDown(ifname string) error {
 
 func SetInterfaceUp(ifname string) error {
 	cmd := exec.Command("ip", "link", "set", ifname, "up")
-	return cmd.Run()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%v: %s", err, string(output))
+	}
+	return nil
 }
 
 // KillHostapdProcesses kills any running hostapd processes for a specific interface
@@ -126,7 +130,12 @@ func ResetInterface(ifname string) error {
 		fmt.Printf("  Warning: could not flush IP addresses: %v\n", err)
 	}
 
-	// 5. Bring interface back up
+	// 5. Unblock rfkill if necessary
+	if err := UnblockRFKill(ifname); err != nil {
+		fmt.Printf("  Warning: could not unblock rfkill: %v\n", err)
+	}
+
+	// 6. Bring interface back up
 	if err := SetInterfaceUp(ifname); err != nil {
 		return fmt.Errorf("failed to bring interface up: %v", err)
 	}
