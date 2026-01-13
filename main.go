@@ -67,7 +67,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// wait 5 seconds
+	// wait 2 seconds
 	time.Sleep(2 * time.Second)
 
 	iface := targetIface.Name
@@ -88,7 +88,7 @@ func main() {
 		errChan <- cmdDnsmasq.Wait()
 	}()
 
-	// wait 5 seconds
+	// wait 2 seconds
 	time.Sleep(2 * time.Second)
 
 	go func() {
@@ -100,7 +100,9 @@ func main() {
 	select {
 	case err = <-errChan:
 		// One of the commands exited
+		fmt.Println("dnsmasq  or Hostapd exits")
 	case <-ctx.Done():
+		fmt.Println("Canceled")
 		// Context canceled
 	}
 
