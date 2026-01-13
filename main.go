@@ -47,9 +47,14 @@ func main() {
 		log.Fatal("No wifi interfaces found")
 	}
 
-	password := "MyPassword"
+	sSID := "MySSID"
 	if len(os.Args) > 1 {
-		password = os.Args[1]
+		sSID = os.Args[1]
+	}
+
+	password := "MyPassword"
+	if len(os.Args) > 2 {
+		password = os.Args[2]
 	}
 
 	targetIface := wInterfaces[0]
@@ -74,7 +79,7 @@ func main() {
 		// Channel: 36,       // Optional: auto-selected if 0 or omitted
 	}
 
-	cmdHostapd, err := pkg.StartHostapd(ctx, targetIface.Name, "192.168.107.1/24", "MySSID", password, wifiConfig)
+	cmdHostapd, err := pkg.StartHostapd(ctx, targetIface.Name, "192.168.107.1/24", sSID, password, wifiConfig)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "start hostapd:", err)
 		os.Exit(1)
