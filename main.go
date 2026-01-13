@@ -131,8 +131,22 @@ func main() {
 
 	// Cleanup
 	fmt.Println("Cleaning up...")
+
+	// Stop services
 	pkg.StopCmd(cmdDnsmasq)
 	pkg.StopCmd(cmdHostapd)
+
+	// Remove NAT rules
+	fmt.Println("Removing NAT rules...")
+	if err := pkg.DisableNAT(context.Background(), "192.168.107.0/24", iface, wanIface); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to remove NAT rules: %v\n", err)
+	}
+
+	// Remove dnsmasq firewall rules
+	fmt.Println("Removing firewall rules...")
+	if err := pkg.EnsureDnsmasqFirewall(context.Background(), iface, false); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to remove firewall rules: %v\n", err)
+	}
 
 	if err != nil && ctx.Err() == nil {
 		fmt.Fprintln(os.Stderr, "exited:", err)
