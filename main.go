@@ -116,7 +116,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	_ = pkg.EnableNAT(ctx, "192.168.107.0/24", "wlan0", wanIface)
+	_ = pkg.EnsureDnsmasqFirewall(ctx, iface, true)
+
+	_ = pkg.EnableNAT(ctx, "192.168.107.0/24", iface, wanIface)
 
 	select {
 	case err = <-errChan:
