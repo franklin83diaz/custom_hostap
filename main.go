@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 	"wifigo/pkg"
 
 	"github.com/mdlayher/wifi"
@@ -60,17 +61,14 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go func() {
-		fmt.Println("Press ENTER to stop...")
-		fmt.Scanln()
-		cancel()
-	}()
-
 	cmdHostapd, err := pkg.StartHostapd(ctx, targetIface.Name, "192.168.107.1/24", "MySSID", password)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "start hostapd:", err)
 		os.Exit(1)
 	}
+
+	// wait 5 seconds
+	time.Sleep(2 * time.Second)
 
 	iface := targetIface.Name
 	ip := "192.168.107.1"
@@ -88,6 +86,15 @@ func main() {
 	}()
 	go func() {
 		errChan <- cmdDnsmasq.Wait()
+	}()
+
+	// wait 5 seconds
+	time.Sleep(2 * time.Second)
+
+	go func() {
+		fmt.Println("Press ENTER to stop...")
+		fmt.Scanln()
+		cancel()
 	}()
 
 	select {
