@@ -138,6 +138,24 @@ func configureWifiSettings(config *WifiConfig) (hwMode string, channel int, ieee
 	return hwMode, channel, ieee80211n, ieee80211ac, ieee80211ax
 }
 
+// checkHostapdWifi6Support checks if hostapd supports 802.11ax
+func checkHostapdWifi6Support() bool {
+	// Create a minimal test config with ax support
+	testConf := `interface=test
+ieee80211ax=1`
+	tmpFile := "/tmp/hostapd_ax_test.conf"
+	if err := os.WriteFile(tmpFile, []byte(testConf), 0644); err != nil {
+		return false
+	}
+	defer os.Remove(tmpFile)
+
+	// Try to parse the config
+	cmd := exec.Command("hostapd", "-t", tmpFile)
+	err := cmd.Run()
+	// If hostapd exits without "unknown configuration" error, ax is supported
+	return err == nil
+}
+
 // StartHostapd configures and starts hostapd.
 // addrAndMask example: "192.168.107.1/24"
 func StartHostapd(ctx context.Context, ifaceName, addrAndMask, ssid, password string, config *WifiConfig) (*exec.Cmd, error) {
@@ -147,6 +165,14 @@ func StartHostapd(ctx context.Context, ifaceName, addrAndMask, ssid, password st
 			Standard: Wifi6,
 			Band:     "5",
 		}
+	}
+
+	// Check if WiFi 6 is requested but not supported
+	if config.Standard == Wifi6 && !checkHostapdWifi6Support() {
+		fmt.Println("WARNING: WiFi 6 (802.11ax) requested but your hostapd doesn't support it.")
+		fmt.Println("         Falling back to WiFi 5 (802.11ac). To fix this, install a newer hostapd")
+		fmt.Println("         compiled with CONFIG_IEEE80211AX=y support.")
+		config.Standard = Wifi5
 	}
 
 	hwMode, channel, ieee80211n, ieee80211ac, ieee80211ax := configureWifiSettings(config)
@@ -176,16 +202,39 @@ channel=%d
 wpa=2
 wpa_passphrase=%s
 wpa_key_mgmt=WPA-PSK
-rsn_pairwise=CCMP`, ifaceName, ssid, hwMode, channel, password)
+rsn_pairwise=CCMP
+country_code=US
+ieee80211d=1
+ieee80211h=1`, ifaceName, ssid, hwMode, channel, password)
 
 	if ieee80211n {
 		confContent += "\nieee80211n=1"
+		confContent += "\nht_capab=[HT40+][SHORT-GI-20][SHORT-GI-40][DSSS_CCK-40]"
 	}
 	if ieee80211ac {
 		confContent += "\nieee80211ac=1"
+		confContent += "\nvht_oper_chwidth=1"
+		confContent += "\nvht_oper_centr_freq_seg0_idx=42"
+		confContent += "\nvht_capab=[MAX-MPDU-11454][RXLDPC][SHORT-GI-80][TX-STBC-2BY1][RX-STBC-1]"
 	}
+	// WiFi 6 (802.11ax) support - only if hostapd supports it
+	// Note: Some hostapd builds don't include 802.11ax support
+	// If you get errors, your hostapd may not be compiled with CONFIG_IEEE80211AX=y
 	if ieee80211ax {
+		// Test if hostapd supports 802.11ax by checking version
+		// For now, we'll try to add the config and let hostapd fail gracefully
+		// You can disable this by using Wifi5 instead of Wifi6
 		confContent += "\nieee80211ax=1"
+		confContent += "\nhe_su_beamformer=1"
+		confContent += "\nhe_su_beamformee=1"
+		confContent += "\nhe_mu_beamformer=1"
+		confContent += "\nhe_bss_color=1"
+		confContent += "\nhe_default_pe_duration=4"
+		confContent += "\nhe_rts_threshold=1023"
+		confContent += "\nhe_mu_edca_qos_info_param_count=0"
+		confContent += "\nhe_mu_edca_qos_info_q_ack=0"
+		confContent += "\nhe_mu_edca_qos_info_queue_request=0"
+		confContent += "\nhe_mu_edca_qos_info_txop_request=0"
 	}
 
 	configFile := "hostapd_temp.conf"

@@ -73,9 +73,9 @@ func main() {
 
 	// Configure WiFi settings - Simply select the WiFi generation!
 	wifiConfig := &pkg.WifiConfig{
-		Standard: pkg.Wifi5, // Options: Wifi4, Wifi5, Wifi6, Wifi7
+		Standard: pkg.Wifi6, // Options: Wifi4, Wifi5, Wifi6, Wifi7
 		// Band and Channel are optional - auto-configured if not specified
-		Band: "2.4", // Optional: "2.4" or "5" GHz
+		Band: "5", // Optional: "2.4" or "5" GHz
 		// Channel: 36,       // Optional: auto-selected if 0 or omitted
 	}
 
