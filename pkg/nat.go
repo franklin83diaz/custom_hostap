@@ -30,28 +30,28 @@ func EnableNAT(ctx context.Context, lanCIDR, lanIface, wanIface string) error {
 	}
 
 	// 2) NAT: MASQUERADE lanCIDR out of wanIface
-	//    iptables -t nat -A POSTROUTING -s <lanCIDR> -o <wanIface> -j MASQUERADE
+	//    iptables -t nat -I POSTROUTING -s <lanCIDR> -o <wanIface> -j MASQUERADE
 	if err := iptablesEnsure(ctx,
 		[]string{"-t", "nat", "-C", "POSTROUTING", "-s", lanCIDR, "-o", wanIface, "-j", "MASQUERADE"},
-		[]string{"-t", "nat", "-A", "POSTROUTING", "-s", lanCIDR, "-o", wanIface, "-j", "MASQUERADE"},
+		[]string{"-t", "nat", "-I", "POSTROUTING", "-s", lanCIDR, "-o", wanIface, "-j", "MASQUERADE"},
 	); err != nil {
 		return fmt.Errorf("failed to ensure NAT MASQUERADE: %v", err)
 	}
 
 	// 3) Allow forwarding LAN -> WAN (new connections)
-	//    iptables -A FORWARD -i <lanIface> -o <wanIface> -s <lanCIDR> -j ACCEPT
+	//    iptables -I FORWARD -i <lanIface> -o <wanIface> -s <lanCIDR> -j ACCEPT
 	if err := iptablesEnsure(ctx,
 		[]string{"-C", "FORWARD", "-i", lanIface, "-o", wanIface, "-s", lanCIDR, "-j", "ACCEPT"},
-		[]string{"-A", "FORWARD", "-i", lanIface, "-o", wanIface, "-s", lanCIDR, "-j", "ACCEPT"},
+		[]string{"-I", "FORWARD", "-i", lanIface, "-o", wanIface, "-s", lanCIDR, "-j", "ACCEPT"},
 	); err != nil {
 		return fmt.Errorf("failed to ensure FORWARD LAN->WAN: %v", err)
 	}
 
 	// 4) Allow forwarding WAN -> LAN for established/related
-	//    iptables -A FORWARD -i <wanIface> -o <lanIface> -d <lanCIDR> -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+	//    iptables -I FORWARD -i <wanIface> -o <lanIface> -d <lanCIDR> -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 	if err := iptablesEnsure(ctx,
 		[]string{"-C", "FORWARD", "-i", wanIface, "-o", lanIface, "-d", lanCIDR, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
-		[]string{"-A", "FORWARD", "-i", wanIface, "-o", lanIface, "-d", lanCIDR, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
+		[]string{"-I", "FORWARD", "-i", wanIface, "-o", lanIface, "-d", lanCIDR, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
 	); err != nil {
 		return fmt.Errorf("failed to ensure FORWARD WAN->LAN established: %v", err)
 	}
@@ -89,8 +89,27 @@ func iptablesEnsure(ctx context.Context, checkArgs, addArgs []string) error {
 	if err := runCmd(ctx, "iptables", checkArgs...); err == nil {
 		return nil
 	}
-	// Otherwise add it
-	if err := runCmd(ctx, "iptables", addArgs...); err != nil {
+
+	// Replace -A (append) or -I (insert) with -I <chain> 1 to insert at position 1
+	// This ensures our rules have priority over UFW rules
+	insertArgs := make([]string, 0, len(addArgs)+1)
+	foundChainFlag := false
+
+	for _, arg := range addArgs {
+		if arg == "-A" || arg == "-I" {
+			insertArgs = append(insertArgs, "-I")
+			foundChainFlag = true
+		} else if foundChainFlag && !strings.HasPrefix(arg, "-") {
+			// This is the chain name, add it and then position 1
+			insertArgs = append(insertArgs, arg, "1")
+			foundChainFlag = false
+		} else {
+			insertArgs = append(insertArgs, arg)
+		}
+	}
+
+	// Add rule at position 1 of the chain
+	if err := runCmd(ctx, "iptables", insertArgs...); err != nil {
 		return err
 	}
 	return nil
