@@ -115,15 +115,9 @@ func main() {
 		cancel()
 	}()
 
-	wanIface, err := pkg.DetectWANInterface()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "DetectWANInterface:", err)
-		os.Exit(1)
-	}
-
 	_ = pkg.EnsureDnsmasqFirewall(ctx, iface, true)
 
-	_ = pkg.EnableNAT(ctx, "192.168.107.0/24", iface, wanIface)
+	_ = pkg.EnableNAT(ctx, "192.168.107.0/24")
 
 	select {
 	case err = <-errChan:
@@ -143,7 +137,7 @@ func main() {
 
 	// Remove NAT rules
 	fmt.Println("Removing NAT rules...")
-	if err := pkg.DisableNAT(context.Background(), "192.168.107.0/24", iface, wanIface); err != nil {
+	if err := pkg.DisableNAT(context.Background(), "192.168.107.0/24"); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to remove NAT rules: %v\n", err)
 	}
 

@@ -14,9 +14,9 @@ import (
 // EnableNAT enables IPv4 forwarding and sets up iptables NAT for lanCIDR (e.g. "192.168.107.0/24").
 // lanIface: interface where your clients are (e.g. wlan0 with hostapd)
 // wanIface: uplink interface (e.g. eth0)
-func EnableNAT(ctx context.Context, lanCIDR, lanIface, wanIface string) error {
-	if lanCIDR == "" || lanIface == "" || wanIface == "" {
-		return fmt.Errorf("lanCIDR, lanIface and wanIface are required")
+func EnableNAT(ctx context.Context, lanCIDR string) error {
+	if lanCIDR == "" {
+		return fmt.Errorf("lanCIDR is required")
 	}
 
 	// Validate CIDR
@@ -32,8 +32,8 @@ func EnableNAT(ctx context.Context, lanCIDR, lanIface, wanIface string) error {
 	// 2) NAT: MASQUERADE lanCIDR out of wanIface
 	//    iptables -t nat -I POSTROUTING -s <lanCIDR> -o <wanIface> -j MASQUERADE
 	if err := iptablesEnsure(ctx,
-		[]string{"-t", "nat", "-C", "POSTROUTING", "-s", lanCIDR, "-o", wanIface, "-j", "MASQUERADE"},
-		[]string{"-t", "nat", "-I", "POSTROUTING", "-s", lanCIDR, "-o", wanIface, "-j", "MASQUERADE"},
+		[]string{"-t", "nat", "-C", "POSTROUTING", "-s", lanCIDR, "-j", "MASQUERADE"},
+		[]string{"-t", "nat", "-I", "POSTROUTING", "-s", lanCIDR, "-j", "MASQUERADE"},
 	); err != nil {
 		return fmt.Errorf("failed to ensure NAT MASQUERADE: %v", err)
 	}
@@ -41,8 +41,8 @@ func EnableNAT(ctx context.Context, lanCIDR, lanIface, wanIface string) error {
 	// 3) Allow forwarding LAN -> WAN (new connections)
 	//    iptables -I FORWARD -i <lanIface> -o <wanIface> -s <lanCIDR> -j ACCEPT
 	if err := iptablesEnsure(ctx,
-		[]string{"-C", "FORWARD", "-i", lanIface, "-o", wanIface, "-s", lanCIDR, "-j", "ACCEPT"},
-		[]string{"-I", "FORWARD", "-i", lanIface, "-o", wanIface, "-s", lanCIDR, "-j", "ACCEPT"},
+		[]string{"-C", "FORWARD", "-s", lanCIDR, "-j", "ACCEPT"},
+		[]string{"-I", "FORWARD", "-s", lanCIDR, "-j", "ACCEPT"},
 	); err != nil {
 		return fmt.Errorf("failed to ensure FORWARD LAN->WAN: %v", err)
 	}
@@ -50,8 +50,8 @@ func EnableNAT(ctx context.Context, lanCIDR, lanIface, wanIface string) error {
 	// 4) Allow forwarding WAN -> LAN for established/related
 	//    iptables -I FORWARD -i <wanIface> -o <lanIface> -d <lanCIDR> -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 	if err := iptablesEnsure(ctx,
-		[]string{"-C", "FORWARD", "-i", wanIface, "-o", lanIface, "-d", lanCIDR, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
-		[]string{"-I", "FORWARD", "-i", wanIface, "-o", lanIface, "-d", lanCIDR, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
+		[]string{"-C", "FORWARD", "-d", lanCIDR, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
+		[]string{"-I", "FORWARD", "-d", lanCIDR, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
 	); err != nil {
 		return fmt.Errorf("failed to ensure FORWARD WAN->LAN established: %v", err)
 	}
@@ -60,25 +60,25 @@ func EnableNAT(ctx context.Context, lanCIDR, lanIface, wanIface string) error {
 }
 
 // DisableNAT removes the same rules (useful for cleanup).
-func DisableNAT(ctx context.Context, lanCIDR, lanIface, wanIface string) error {
+func DisableNAT(ctx context.Context, lanCIDR string) error {
 	if _, _, err := net.ParseCIDR(lanCIDR); err != nil {
 		return fmt.Errorf("invalid lanCIDR %q: %v", lanCIDR, err)
 	}
 
 	// Remove in reverse-ish order; ignore "not found" errors by doing -C before -D
 	_ = iptablesDeleteIfPresent(ctx,
-		[]string{"-t", "nat", "-C", "POSTROUTING", "-s", lanCIDR, "-o", wanIface, "-j", "MASQUERADE"},
-		[]string{"-t", "nat", "-D", "POSTROUTING", "-s", lanCIDR, "-o", wanIface, "-j", "MASQUERADE"},
+		[]string{"-t", "nat", "-C", "POSTROUTING", "-s", lanCIDR, "-j", "MASQUERADE"},
+		[]string{"-t", "nat", "-D", "POSTROUTING", "-s", lanCIDR, "-j", "MASQUERADE"},
 	)
 
 	_ = iptablesDeleteIfPresent(ctx,
-		[]string{"-C", "FORWARD", "-i", lanIface, "-o", wanIface, "-s", lanCIDR, "-j", "ACCEPT"},
-		[]string{"-D", "FORWARD", "-i", lanIface, "-o", wanIface, "-s", lanCIDR, "-j", "ACCEPT"},
+		[]string{"-C", "FORWARD", "-s", lanCIDR, "-j", "ACCEPT"},
+		[]string{"-D", "FORWARD", "-s", lanCIDR, "-j", "ACCEPT"},
 	)
 
 	_ = iptablesDeleteIfPresent(ctx,
-		[]string{"-C", "FORWARD", "-i", wanIface, "-o", lanIface, "-d", lanCIDR, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
-		[]string{"-D", "FORWARD", "-i", wanIface, "-o", lanIface, "-d", lanCIDR, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
+		[]string{"-C", "FORWARD", "-d", lanCIDR, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
+		[]string{"-D", "FORWARD", "-d", lanCIDR, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
 	)
 
 	return nil
@@ -146,49 +146,4 @@ func isDefaultV4Route(r netlink.Route) bool {
 		return false
 	}
 	return ip.Equal(net.IPv4(0, 0, 0, 0)) && ones == 0
-}
-
-// DetectWANInterface retorna la interfaz usada por la ruta por defecto IPv4.
-func DetectWANInterface() (string, error) {
-	routes, err := netlink.RouteListFiltered(
-		netlink.FAMILY_V4,
-		&netlink.Route{Table: 254}, // main
-		netlink.RT_FILTER_TABLE,
-	)
-	if err != nil {
-		return "", fmt.Errorf("RouteListFiltered failed: %v", err)
-	}
-
-	var best *netlink.Route
-	for i := range routes {
-		r := routes[i]
-
-		// netlink imprime "Ifindex", pero es el mismo campo (LinkIndex) internamente
-		if r.LinkIndex <= 0 {
-			continue
-		}
-		if !isDefaultV4Route(r) {
-			continue
-		}
-
-		// Si hay varias default routes, escoger por métrica (Priority menor)
-		if best == nil {
-			best = &r
-			continue
-		}
-		// Priority puede venir 0; en ese caso, tratamos 0 como "sin métrica"
-		if r.Priority != 0 && (best.Priority == 0 || r.Priority < best.Priority) {
-			best = &r
-		}
-	}
-
-	if best == nil {
-		return "", fmt.Errorf("no default IPv4 route found")
-	}
-
-	link, err := netlink.LinkByIndex(best.LinkIndex)
-	if err != nil {
-		return "", fmt.Errorf("LinkByIndex(%d) failed: %v", best.LinkIndex, err)
-	}
-	return link.Attrs().Name, nil
 }
