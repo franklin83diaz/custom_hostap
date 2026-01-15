@@ -1,3 +1,8 @@
+need install: rfkill, Dnsmasq, Hostapd 
+
+```
+sudo apt-get install rfkill
+```
 
 arm64
 
